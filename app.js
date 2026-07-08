@@ -74,9 +74,14 @@ window.onYouTubeIframeAPIReady = () => {
         }
       },
       onStateChange: (event) => {
+        if (event.data === YT.PlayerState.PLAYING) {
+          isPlaying = true;
+          setFeedback("Playing hourly music...");
+        }
         if (event.data === YT.PlayerState.ENDED && isPlaying) playCurrentHour(true);
       },
-      onError: () => setFeedback("This hour's YouTube track is unavailable. Try refresh."),
+      onError: (event) =>
+        setFeedback(`YouTube blocked this track or embed. Error ${event.data}.`),
     },
   });
 
@@ -126,21 +131,31 @@ function getCurrentTrack() {
 
 function playCurrentHour(forceReload = false) {
   if (!playerReady) {
-    setFeedback("Player is still loading...");
+    pendingPlay = true;
+    setFeedback("Loading player. Press Play again if it stays silent.");
     return;
   }
 
   const hour = new Date().getHours();
   const track = hourlyTracks[hour];
   if (forceReload || hour !== lastHour) {
-    musicPlayer.loadVideoById(track);
+    musicPlayer.loadVideoById({ videoId: track, startSeconds: 0 });
     lastHour = hour;
-  } else {
-    musicPlayer.playVideo();
   }
 
+  musicPlayer.unMute();
+  applyVolume();
+  musicPlayer.playVideo();
+  setTimeout(() => musicPlayer.playVideo(), 250);
+  setTimeout(() => {
+    const state = musicPlayer.getPlayerState?.();
+    if (state !== YT.PlayerState.PLAYING) {
+      musicPlayer.playVideo();
+      setFeedback("If it stays silent, press Play once more.");
+    }
+  }, 1000);
   isPlaying = true;
-  setFeedback("Playing hourly music...");
+  setFeedback("Starting hourly music...");
 }
 
 function pauseAll() {
@@ -160,7 +175,10 @@ function toggleRain() {
   rainEnabled = !rainEnabled;
   if (rainEnabled) {
     rainPlayer.loadVideoById(rainTrack);
+    rainPlayer.unMute();
+    applyVolume();
     rainPlayer.playVideo();
+    setTimeout(() => rainPlayer.playVideo(), 250);
     setFeedback("Rain layer on.");
   } else {
     rainPlayer.pauseVideo();
