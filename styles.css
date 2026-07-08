@@ -330,41 +330,6 @@ input[type="range"]::-moz-range-thumb {
   text-align: right;
 }
 
-#light-switch {
-  position: fixed;
-  top: -1.5em;
-  right: 1em;
-  text-align: center;
-  cursor: pointer;
-  z-index: 20;
-  color: #fac403;
-}
-
-#light-switch .rope {
-  width: 1em;
-  height: 7em;
-  margin: -1em auto 0;
-  border-radius: 999px;
-  background: var(--paper);
-}
-
-#light-switch .knob {
-  position: relative;
-  bottom: 12px;
-  font-family: sans-serif;
-  font-size: 2rem;
-}
-
-#film {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  background: black;
-  opacity: 0.48;
-  pointer-events: none;
-}
-
 @media (max-width: 720px) {
   main {
     padding: 8px;
