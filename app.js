@@ -1,30 +1,27 @@
 const musicTracks = [
-  { id: "nCfk_fAlcQY", length: 9989 },
-  { id: "FA7w4V-G6HM", length: 10915 },
-  { id: "FZhk3dUntm4", length: 10253 },
-  { id: "89GgPlxbqYs", length: 21677 },
+  { src: "./audio/animalcrossing-part1.mp3", length: 4995 },
+  { src: "./audio/animalcrossing-part2.mp3", length: 4994 },
 ];
 
 const segmentLength = 8 * 60;
 const rainTrack = "q76bMs-NwRk";
 const scenes = [1, 2, 3, 4, 5].map((n) => `./video-feed/bg_${n}.gif`);
 
-let musicPlayer;
 let rainPlayer;
 let ytReady = false;
-let playerReady = false;
 let rainReady = false;
 let isPlaying = false;
 let rainEnabled = false;
-let pendingPlay = false;
 let pendingRain = false;
-let currentMusicId = "";
+let currentMusicSrc = "";
 let currentSegmentStart = 0;
-let failedMusicIds = new Set();
+let segmentTimer = 0;
 
 const feedback = document.getElementById("feedback");
 const volume = document.getElementById("range");
 const feed = document.getElementById("feed");
+const musicAudio = new Audio();
+musicAudio.preload = "metadata";
 
 function setFeedback(text) {
   if (feedback) feedback.textContent = text;
@@ -32,46 +29,6 @@ function setFeedback(text) {
 
 window.onYouTubeIframeAPIReady = () => {
   ytReady = true;
-  musicPlayer = new YT.Player("music-player", {
-    height: "1",
-    width: "1",
-    videoId: getCurrentTrack(),
-    host: "https://www.youtube-nocookie.com",
-    playerVars: {
-      autoplay: 0,
-      controls: 0,
-      disablekb: 1,
-      enablejsapi: 1,
-      playsinline: 1,
-      rel: 0,
-      origin: window.location.origin,
-    },
-    events: {
-      onReady: () => {
-        playerReady = true;
-        applyVolume();
-        if (pendingPlay) {
-          pendingPlay = false;
-          playMusic();
-        } else {
-          setFeedback("Press Play to start.");
-        }
-      },
-      onStateChange: (event) => {
-        if (event.data === YT.PlayerState.PLAYING) {
-          isPlaying = true;
-          setFeedback("Playing music...");
-        }
-        if (event.data === YT.PlayerState.ENDED && isPlaying) shuffleMusicTrack();
-      },
-      onError: (event) => {
-        if (currentMusicId) failedMusicIds.add(currentMusicId);
-        setFeedback(`Music track unavailable. Trying another source...`);
-        setTimeout(() => playNextMusicTrack(true, event.data), 150);
-      },
-    },
-  });
-
   rainPlayer = new YT.Player("rain-player", {
     height: "1",
     width: "1",
@@ -114,22 +71,22 @@ function loadYouTubeApi(silent = false) {
 }
 
 function getCurrentTrack() {
-  return currentMusicId || musicTracks[0].id;
+  return currentMusicSrc || musicTracks[0].src;
 }
 
 function getMusicCandidates() {
-  return musicTracks.filter((track) => !failedMusicIds.has(track.id));
+  return musicTracks;
 }
 
 function getSafeMusicCandidates() {
-  return musicTracks.filter((track) => !failedMusicIds.has(track.id));
+  return musicTracks;
 }
 
 function getRandomSegment(track) {
   const maxStart = Math.max(0, track.length - segmentLength);
   const segmentCount = Math.max(1, Math.floor(maxStart / segmentLength) + 1);
   const unavailableCurrentSegment =
-    track.id !== currentMusicId || segmentCount < 2
+    track.src !== currentMusicSrc || segmentCount < 2
       ? -1
       : Math.floor(currentSegmentStart / segmentLength);
   const options = Array.from({ length: segmentCount }, (_, index) => index).filter(
@@ -140,108 +97,76 @@ function getRandomSegment(track) {
 }
 
 function startMusicTrack(track, statusText, startSeconds = 0) {
-  currentMusicId = track.id;
+  currentMusicSrc = track.src;
   currentSegmentStart = startSeconds;
-  musicPlayer.loadVideoById({
-    videoId: track.id,
-    startSeconds,
-    endSeconds: Math.min(track.length, startSeconds + segmentLength),
-  });
-  musicPlayer.unMute();
+  clearTimeout(segmentTimer);
+  if (musicAudio.src !== new URL(track.src, window.location.href).href) {
+    musicAudio.src = track.src;
+  }
+  musicAudio.currentTime = startSeconds;
   applyVolume();
-  musicPlayer.playVideo();
-  setTimeout(() => musicPlayer.playVideo(), 250);
-  setTimeout(() => {
-    const state = musicPlayer.getPlayerState?.();
-    if (state !== YT.PlayerState.PLAYING) {
-      musicPlayer.playVideo();
-      setFeedback("If it stays silent, press Play or Shuffle once more.");
-    }
-  }, 1000);
   isPlaying = true;
   setFeedback(statusText);
-}
-
-function playNextMusicTrack(autoFallback = false, errorCode = "") {
-  if (!playerReady) {
-    pendingPlay = true;
-    setFeedback("Loading player. Press Play again if it stays silent.");
-    return;
-  }
-
-  const candidates = getMusicCandidates();
-  const currentIndex = candidates.findIndex((track) => track.id === currentMusicId);
-  const nextTrack = candidates[currentIndex + 1] || candidates[0];
-
-  if (!nextTrack) {
-    setFeedback(`No available music tracks. YouTube error ${errorCode || "unknown"}.`);
-    isPlaying = false;
-    return;
-  }
-
-  startMusicTrack(
-    nextTrack,
-    autoFallback ? "Trying backup music..." : "Trying another music track..."
-  );
+  musicAudio
+    .play()
+    .then(() => {
+      setFeedback(statusText);
+      scheduleSegmentEnd(track, startSeconds);
+    })
+    .catch(() => {
+      isPlaying = false;
+      setFeedback("Press Play again to start audio.");
+    });
 }
 
 function shuffleMusicTrack() {
-  if (!playerReady) {
-    pendingPlay = true;
-    setFeedback("Loading player. Press Play again if it stays silent.");
-    return;
-  }
-
   const candidates = getSafeMusicCandidates();
-  const options = candidates.filter((track) => track.id !== currentMusicId);
+  const options = candidates.filter((track) => track.src !== currentMusicSrc);
   const pool = options.length > 0 ? options : candidates;
   const nextTrack = pool[Math.floor(Math.random() * pool.length)];
 
   if (!nextTrack) {
-    playNextMusicTrack(false);
+    setFeedback("No available music tracks.");
     return;
   }
 
   startMusicTrack(nextTrack, "Shuffled music segment...", getRandomSegment(nextTrack));
 }
 
-function playMusic(forceReload = false) {
-  if (!playerReady) {
-    pendingPlay = true;
-    setFeedback("Loading player. Press Play again if it stays silent.");
-    return;
-  }
+function scheduleSegmentEnd(track, startSeconds) {
+  const secondsLeft = Math.max(
+    1,
+    Math.min(segmentLength, track.length - startSeconds)
+  );
+  segmentTimer = setTimeout(() => {
+    if (isPlaying) shuffleMusicTrack();
+  }, secondsLeft * 1000);
+}
 
-  const track = currentMusicId && !failedMusicIds.has(currentMusicId)
-    ? musicTracks.find((candidate) => candidate.id === currentMusicId)
+function playMusic(forceReload = false) {
+  const track = currentMusicSrc
+    ? musicTracks.find((candidate) => candidate.src === currentMusicSrc)
     : getMusicCandidates()[0];
   if (!track) {
     setFeedback("No available music tracks.");
     return;
   }
 
-  if (forceReload || currentMusicId !== track.id) {
-    startMusicTrack(track, "Starting music...");
+  if (forceReload || currentMusicSrc !== track.src) {
+    startMusicTrack(track, "Starting music segment...", getRandomSegment(track));
     return;
   }
 
-  musicPlayer.unMute();
+  clearTimeout(segmentTimer);
   applyVolume();
-  musicPlayer.playVideo();
-  setTimeout(() => musicPlayer.playVideo(), 250);
-  setTimeout(() => {
-    const state = musicPlayer.getPlayerState?.();
-    if (state !== YT.PlayerState.PLAYING) {
-      musicPlayer.playVideo();
-      setFeedback("If it stays silent, press Play once more.");
-    }
-  }, 1000);
   isPlaying = true;
   setFeedback("Starting music...");
+  musicAudio.play().then(() => scheduleSegmentEnd(track, musicAudio.currentTime));
 }
 
 function pauseAll() {
-  if (playerReady) musicPlayer.pauseVideo();
+  musicAudio.pause();
+  clearTimeout(segmentTimer);
   if (rainReady) rainPlayer.pauseVideo();
   isPlaying = false;
   rainEnabled = false;
@@ -270,7 +195,7 @@ function toggleRain() {
 
 function applyVolume() {
   const value = Number(volume?.value ?? 85);
-  if (playerReady) musicPlayer.setVolume(value);
+  musicAudio.volume = value / 100;
   if (rainReady) rainPlayer.setVolume(Math.round(value * 0.35));
 }
 
@@ -290,9 +215,7 @@ function updateClock() {
 }
 
 document.getElementById("play").addEventListener("click", () => {
-  loadYouTubeApi();
-  if (playerReady) playMusic();
-  else pendingPlay = true;
+  playMusic();
 });
 
 document.getElementById("pause").addEventListener("click", pauseAll);
@@ -305,11 +228,7 @@ document.getElementById("layerRain").addEventListener("click", () => {
 document.getElementById("refresh").addEventListener("click", () => {
   const next = scenes[Math.floor(Math.random() * scenes.length)];
   feed.src = next;
-  if (playerReady) {
-    shuffleMusicTrack();
-  } else {
-    setFeedback("Scene shuffled. Press Play for music.");
-  }
+  shuffleMusicTrack();
 });
 
 volume.addEventListener("input", applyVolume);
